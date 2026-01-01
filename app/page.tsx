@@ -387,6 +387,24 @@ function HomeContent() {
           if (finalChunk) setFinalTranscript(prev => prev + ' ' + finalChunk);
           setTranscript(interimTranscript);
         };
+
+        recognitionRef.current.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          if (event.error === 'not-allowed') {
+            setError('Microphone access denied. Please allow microphone access in your browser settings.');
+          }
+        };
+
+        recognitionRef.current.onend = () => {
+          // Auto-restart if still in recording state (handles Chrome's auto-stop)
+          if (recognitionRef.current && appState === 'RECORDING') {
+            try {
+              recognitionRef.current.start();
+            } catch (e) {
+              // Already started or stopped
+            }
+          }
+        };
       }
     }
   }, []);
