@@ -1,76 +1,102 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { processTranscript } from './actions/gemini';
-import { DocType, DocLength, WritingStyle, ProcessingConfig } from '@/types';
+import { DocType, WritingStyle, ProcessingConfig } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import {
-  SparklesIcon,
-  DocumentDuplicateIcon,
-  CheckCircleIcon,
   LockClosedIcon,
   StarIcon,
-  ArrowPathIcon,
-  XMarkIcon,
-  PencilSquareIcon,
-  ArrowDownTrayIcon,
-  ClipboardDocumentCheckIcon,
   QueueListIcon,
   ShareIcon,
   GlobeAltIcon,
-  MicrophoneIcon
+  MicrophoneIcon,
+  StopIcon,
+  ClockIcon,
+  ArchiveBoxIcon
 } from '@heroicons/react/24/solid';
 
 // --- Components ---
 
-const MechanicalMeter = ({ isActive, volume }: { isActive: boolean; volume: number }) => {
+const MechanicalMeter = ({ isActive }: { isActive: boolean }) => {
+  const [bars, setBars] = useState<number[]>(new Array(6).fill(1));
+
+  useEffect(() => {
+    let interval: any;
+    if (isActive) {
+      interval = setInterval(() => {
+        setBars(prev => prev.map(() => Math.max(2, Math.floor(Math.random() * 10))));
+      }, 100);
+    } else {
+      setBars(new Array(6).fill(1));
+    }
+    return () => clearInterval(interval);
+  }, [isActive]);
+
   return (
-    <div className="flex gap-0.5 h-6 items-end opacity-80">
-      {[...Array(12)].map((_, i) => (
+    <div className="flex items-end gap-0.5 h-4">
+      {bars.map((height, i) => (
         <div
           key={i}
-          className={`w-1 transition-mechanical ${isActive && i < volume ? 'bg-oxide-red h-full' : 'bg-ink-border h-1'
-            }`}
+          className="w-1 bg-oxide-red transition-all duration-75 ease-out rounded-t-sm"
+          style={{ height: `${height * 10}%`, opacity: isActive ? 1 : 0.3 }}
         />
       ))}
     </div>
   );
 };
 
-const UpsellModal = ({ isOpen, onClose, onUpgrade }: { isOpen: boolean; onClose: () => void; onUpgrade: () => void }) => {
+const UpsellModal = ({ isOpen, onClose, onUpgrade, mode = 'UPGRADE' }: { isOpen: boolean; onClose: () => void; onUpgrade: () => void; mode?: 'UPGRADE' | 'HISTORY' }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-ink-base/90 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 bg-ink-base/90 backdrop-blur-md transition-opacity"
         onClick={onClose}
       />
       <div className="relative bg-ink-surface border border-ink-border rounded-sm max-w-md w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 font-sans">
         {/* Header */}
         <div className="bg-ink-base p-6 text-center border-b border-ink-border">
           <div className="mx-auto w-10 h-10 border border-ink-border rounded-full flex items-center justify-center mb-4 text-paper-muted">
-            <LockClosedIcon className="w-5 h-5" />
+            {mode === 'HISTORY' ? <ArchiveBoxIcon className="w-5 h-5" /> : <LockClosedIcon className="w-5 h-5" />}
           </div>
-          <h2 className="text-xl font-medium text-paper-text tracking-tight mb-1">Upgrade to Pro</h2>
-          <p className="text-paper-muted text-xs uppercase tracking-widest">Unlocking Advanced Tools</p>
+          <h2 className="text-xl font-medium text-paper-text tracking-tight mb-1">
+            {mode === 'HISTORY' ? 'History is a Pro Feature' : 'Upgrade to Pro'}
+          </h2>
+          <p className="text-paper-muted text-xs uppercase tracking-widest">
+            {mode === 'HISTORY' ? 'Save & Organise Your Thinking' : 'Unlocking Advanced Tools'}
+          </p>
         </div>
 
         {/* Features */}
         <div className="p-8 space-y-6">
-          <div className="flex items-start gap-3">
-            <CheckCircleIcon className="w-5 h-5 text-oxide-red mt-0.5" />
+          <div className="flex items-start gap-4">
+            <div className="w-8 h-8 rounded-full bg-ink-base border border-ink-border flex items-center justify-center text-oxide-red flex-shrink-0">
+              <ClockIcon className="w-4 h-4" />
+            </div>
             <div>
               <h4 className="font-medium text-paper-text text-sm">30-Minute Recording</h4>
-              <p className="text-xs text-paper-muted leading-relaxed">Extended recording time for deep focus sessions.</p>
+              <p className="text-xs text-paper-muted leading-relaxed mt-1">Increase your limit from 2:00 to 30:00 per session.</p>
             </div>
           </div>
-          <div className="flex items-start gap-3">
-            <CheckCircleIcon className="w-5 h-5 text-oxide-red mt-0.5" />
+          <div className="flex items-start gap-4">
+            <div className="w-8 h-8 rounded-full bg-ink-base border border-ink-border flex items-center justify-center text-oxide-red flex-shrink-0">
+              <QueueListIcon className="w-4 h-4" />
+            </div>
             <div>
               <h4 className="font-medium text-paper-text text-sm">Cloud History</h4>
-              <p className="text-xs text-paper-muted leading-relaxed">Save and sync your sessions across devices.</p>
+              <p className="text-xs text-paper-muted leading-relaxed mt-1">Automatically save all your transcripts and drafts.</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-4">
+            <div className="w-8 h-8 rounded-full bg-ink-base border border-ink-border flex items-center justify-center text-oxide-red flex-shrink-0">
+              <ShareIcon className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="font-medium text-paper-text text-sm">Direct Integrations</h4>
+              <p className="text-xs text-paper-muted leading-relaxed mt-1">Send drafts directly to Notion, LinkedIn & WordPress.</p>
             </div>
           </div>
         </div>
@@ -79,7 +105,7 @@ const UpsellModal = ({ isOpen, onClose, onUpgrade }: { isOpen: boolean; onClose:
         <div className="p-4 bg-ink-base border-t border-ink-border flex flex-col gap-3">
           <button
             onClick={onUpgrade}
-            className="w-full bg-oxide-red hover:bg-orange-700 text-white font-medium py-3 rounded-sm transition-colors flex items-center justify-center gap-2 text-sm uppercase tracking-wider"
+            className="w-full bg-oxide-red hover:bg-orange-700 text-white font-medium py-3 rounded-sm transition-colors flex items-center justify-center gap-2 text-sm uppercase tracking-wider shadow-lg shadow-oxide-red/20"
           >
             <StarIcon className="w-4 h-4" />
             Upgrade - $9/mo
@@ -109,14 +135,14 @@ export default function Home() {
   const [finalTranscript, setFinalTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState('');
-  const [volume, setVolume] = useState(0);
 
   // UI & Tier State
   const [isPro, setIsPro] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [showUpsell, setShowUpsell] = useState(false);
+  const [upsellMode, setUpsellMode] = useState<'UPGRADE' | 'HISTORY'>('UPGRADE');
 
-  // Configuration (Switches)
+  // Configuration
   const [config, setConfig] = useState<ProcessingConfig>({
     docType: 'DESIGN_FEEDBACK',
     length: 'DETAILED',
@@ -124,11 +150,10 @@ export default function Home() {
   });
 
   const recognitionRef = useRef<any>(null);
-  const resultRef = useRef<HTMLDivElement>(null);
 
   // Constants
-  const FREE_LIMIT = 120;
-  const PRO_LIMIT = 1800;
+  const FREE_LIMIT = 120; // 2 minutes
+  const PRO_LIMIT = 1800; // 30 minutes
   const currentLimit = isPro ? PRO_LIMIT : FREE_LIMIT;
 
   // Auth Check
@@ -137,7 +162,6 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUser(user);
-        // Check profile
         const { data } = await supabase.from('profiles').select('is_pro').eq('id', user.id).single();
         if (data) setIsPro(data.is_pro);
       }
@@ -145,28 +169,18 @@ export default function Home() {
     checkUser();
   }, [supabase]);
 
-  // Volume Simulation
-  useEffect(() => {
-    let interval: any;
-    if (isRecording) {
-      interval = setInterval(() => {
-        setVolume(Math.floor(Math.random() * 12));
-      }, 100);
-    } else {
-      setVolume(0);
-    }
-    return () => clearInterval(interval);
-  }, [isRecording]);
-
-  // Timer
+  // Timer Logic
   useEffect(() => {
     let interval: any;
     if (isRecording) {
       interval = setInterval(() => {
         setRecordingSeconds(prev => {
           if (prev >= currentLimit) {
-            toggleRecording(); // Stop
-            if (!isPro) setShowUpsell(true);
+            toggleRecording();
+            if (!isPro) {
+              setUpsellMode('UPGRADE');
+              setShowUpsell(true);
+            }
             return prev;
           }
           return prev + 1;
@@ -178,7 +192,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isRecording, currentLimit, isPro]);
 
-  // Speech Recognition Setup
+  // Speech Recognition
   useEffect(() => {
     if (typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
@@ -224,9 +238,6 @@ export default function Home() {
     try {
       const content = await processTranscript(text, config);
       setResult(content);
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 200);
     } catch (e) {
       console.error(e);
     } finally {
@@ -235,44 +246,47 @@ export default function Home() {
   };
 
   const handleUpgrade = () => {
-    // Placeholder
     alert("Redirecting to Lemon Squeezy Checkout...");
     setShowUpsell(false);
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(result);
+  const handleViewOutput = () => {
+    if (isPro) {
+      alert("Opening History Sidebar (Coming Soon)");
+    } else {
+      setUpsellMode('HISTORY');
+      setShowUpsell(true);
+    }
   };
 
   return (
-    <div className="min-h-screen flex flex-col font-serif bg-ink-base selection:bg-oxide-red selection:text-white">
+    <div className="min-h-screen flex flex-col font-serif bg-ink-base text-paper-text selection:bg-oxide-red selection:text-white overflow-x-hidden">
 
-      {/* Header: Fixed Top Bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-ink-base/80 backdrop-blur-md border-b border-ink-border">
-        <div className="w-full max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Branding Left */}
+      {/* Header */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-ink-base/90 backdrop-blur-md border-b border-ink-border h-16">
+        <div className="w-full max-w-5xl mx-auto px-6 h-full flex items-center justify-between">
           <div className="flex items-baseline gap-4">
-            <h1 className="text-2xl font-serif text-paper-text tracking-tight cursor-default select-none">Vocalize.</h1>
+            <h1 className="text-2xl font-serif tracking-tight cursor-default">Vocalize.</h1>
             <span className="hidden md:inline text-[10px] font-sans uppercase tracking-[0.2em] text-paper-muted opacity-60">System v2.0</span>
           </div>
 
-          {/* Auth/Nav Right */}
           <nav className="flex items-center gap-6 text-[10px] font-sans font-bold uppercase tracking-[0.15em]">
+            <button onClick={handleViewOutput} className="hidden md:flex items-center gap-1.5 hover:text-oxide-red transition-colors text-paper-muted">
+              <ArchiveBoxIcon className="w-3 h-3" /> View Data
+            </button>
+
             {!isPro && (
-              <button onClick={() => setShowUpsell(true)} className="text-oxide-red hover:text-white transition-colors flex items-center gap-1">
+              <button onClick={() => { setUpsellMode('UPGRADE'); setShowUpsell(true); }} className="text-oxide-red hover:text-white transition-colors flex items-center gap-1">
                 <StarIcon className="w-3 h-3" /> Upgrade
               </button>
             )}
 
             {user ? (
-              <div className="flex items-center gap-4">
-                <span className="text-paper-muted hidden sm:inline">{user.email}</span>
-                <button onClick={() => supabase.auth.signOut().then(() => setUser(null))} className="text-paper-muted hover:text-paper-text transition-colors">
-                  Log Out
-                </button>
-              </div>
+              <button onClick={() => supabase.auth.signOut().then(() => setUser(null))} className="text-paper-muted hover:text-paper-text transition-colors">
+                Log Out
+              </button>
             ) : (
-              <button onClick={() => router.push('/login')} className="bg-paper-text text-ink-base px-4 py-1.5 rounded-sm hover:bg-white transition-colors">
+              <button onClick={() => router.push('/login')} className="bg-paper-text text-ink-base px-5 py-1.5 rounded-sm hover:bg-white transition-colors">
                 Log In
               </button>
             )}
@@ -280,85 +294,133 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-3xl mx-auto pt-32 pb-20 px-6 flex flex-col items-center gap-12">
+      {/* Main Content */}
+      <main className="flex-1 w-full max-w-3xl mx-auto pt-32 pb-20 px-6 flex flex-col items-center gap-8 md:gap-12">
 
-        {/* Hero Copy (Minimal) */}
-        <div className="text-center space-y-2 mb-4">
-          <p className="text-3xl text-paper-text font-light italic">
+        {/* Hero Copy */}
+        <div className="text-center space-y-2 mb-2 animate-in fade-in slide-in-from-top-4 duration-700">
+          <p className="text-3xl md:text-4xl text-paper-text font-light italic">
             Stop typing. Just talk.
           </p>
         </div>
 
-        {/* 1. Record Controls (Central) */}
-        <div className="flex flex-col items-center justify-center gap-8 w-full">
+        {/* --- THE INSTRUMENT CORE --- */}
+        <div className="flex flex-col items-center gap-6 w-full max-w-md">
 
-          {/* The Physical Switch */}
-          <div className="relative group">
-            {/* Ambient Light */}
-            <div className={`absolute -inset-8 rounded-full blur-3xl opacity-10 transition-all duration-700 ${isRecording ? 'bg-oxide-red scale-125' : 'bg-transparent'}`} />
+          {/* 1. Record Button */}
+          <div className="relative group z-10">
+            {/* Active Glow */}
+            <div className={`absolute -inset-10 rounded-full blur-3xl opacity-20 transition-all duration-500 ${isRecording ? 'bg-oxide-red scale-110' : 'bg-transparent'}`} />
 
             <button
               onClick={toggleRecording}
               disabled={isProcessing}
               className={`
-                  relative w-24 h-24 rounded-full border border-ink-border transition-all duration-200 ease-out 
-                  flex items-center justify-center active:scale-95 z-10 shadow-xl
+                  relative w-28 h-28 rounded-full border border-ink-border transition-all duration-200 ease-out 
+                  flex items-center justify-center shadow-2xl overflow-hidden
                   ${isRecording
-                  ? 'bg-ink-surface border-oxide-red shadow-[0_0_50px_rgba(234,88,12,0.15)]'
-                  : 'bg-ink-surface hover:bg-ink-surface/80 hover:border-paper-muted'}
+                  ? 'bg-ink-surface border-oxide-red shadow-[0_0_50px_rgba(234,88,12,0.2)] scale-105'
+                  : 'bg-ink-surface hover:bg-ink-surface/80 hover:border-paper-muted hover:-translate-y-0.5'}
                 `}
             >
-              {/* Icon Layer */}
-              <div className={`transition-all duration-300 ${isRecording ? 'text-oxide-red scale-110' : 'text-paper-muted group-hover:text-paper-text'}`}>
+              <div className="flex items-center gap-2">
                 {isRecording ? (
-                  <div className="w-6 h-6 bg-oxide-red rounded-sm shadow-[0_0_15px_rgba(234,88,12,0.5)]" />
+                  <>
+                    <StopIcon className="w-8 h-8 text-oxide-red" />
+                    <MechanicalMeter isActive={true} />
+                  </>
                 ) : (
-                  <MicrophoneIcon className="w-8 h-8" />
+                  <MicrophoneIcon className="w-8 h-8 text-paper-muted group-hover:text-paper-text transition-colors" />
                 )}
               </div>
             </button>
           </div>
 
-          {/* Status & Timer */}
-          <div className="w-full max-w-[200px] flex flex-col items-center gap-2">
-            <div className="w-full flex justify-between text-[10px] uppercase tracking-[0.2em] font-sans font-bold text-paper-muted">
-              <span className={isRecording ? 'text-oxide-red animate-pulse' : ''}>
-                {isRecording ? '● Live Input' : 'Ready'}
-              </span>
-              <span className="font-mono">{Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
-            </div>
+          {/* 2. Transcript & Output Display (Between Mic and Timer) */}
+          <div className="w-full min-h-[140px] relative">
+            {/* Placeholder / Empty State */}
+            {!result && !isRecording && !isProcessing && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 border border-dashed border-ink-border rounded-sm opacity-50">
+                <p className="text-sm text-paper-muted mb-2 font-sans">Ready to capture.</p>
+                <p className="text-[10px] uppercase tracking-widest text-paper-muted/60">Select format below</p>
+              </div>
+            )}
 
-            {/* Mechanical Progress Bar */}
-            <div className="h-1 w-full bg-ink-surface border border-ink-border rounded-full relative overflow-hidden">
+            {/* Active Transcript / Processing */}
+            {(isRecording || isProcessing) && !result && (
+              <div className="w-full h-full p-6 bg-ink-surface/50 border border-ink-border rounded-sm backdrop-blur-sm animate-in fade-in">
+                <div className="flex items-center gap-3 text-oxide-red font-mono text-[10px] uppercase tracking-widest mb-3">
+                  {isProcessing ? '/// PROCESSING...' : '/// RECORDING...'}
+                </div>
+                <p className="font-serif text-lg leading-relaxed text-paper-text line-clamp-4">
+                  {finalTranscript} <span className="text-paper-muted/70">{transcript}</span>
+                </p>
+              </div>
+            )}
+
+            {/* Final Result */}
+            {result && (
+              <div className="w-full bg-ink-surface border border-ink-border rounded-sm p-8 shadow-2xl relative group animate-in zoom-in-95 duration-300">
+                {/* Result Header */}
+                <div className="absolute top-0 left-0 right-0 h-10 border-b border-ink-border bg-ink-base/50 flex items-center justify-between px-4">
+                  <div className="flex gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-oxide-red/40" />
+                    <div className="w-2 h-2 rounded-full bg-paper-muted/20" />
+                    <div className="w-2 h-2 rounded-full bg-paper-muted/20" />
+                  </div>
+                  <button onClick={() => navigator.clipboard.writeText(result)} className="text-[9px] uppercase tracking-widest font-bold text-oxide-red hover:text-white transition-colors">
+                    Copy to Clipboard
+                  </button>
+                </div>
+
+                {/* Result Content */}
+                <div className="mt-6 prose prose-invert prose-p:text-paper-text prose-headings:font-normal prose-sm max-w-none font-serif leading-relaxed">
+                  <p className="whitespace-pre-wrap">{result}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Timer & Limits */}
+          <div className="w-full flex items-center gap-4">
+            <span className="text-[10px] font-mono text-paper-muted">{Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
+
+            {/* Progress Bar */}
+            <div className="flex-1 h-1 bg-ink-surface border border-ink-border rounded-full relative overflow-hidden">
               <div
-                className="h-full bg-oxide-red transition-all duration-1000 ease-linear"
+                className={`h-full transition-all duration-1000 ease-linear ${recordingSeconds > FREE_LIMIT * 0.9 && !isPro ? 'bg-red-500 animate-pulse' : 'bg-oxide-red'}`}
                 style={{ width: `${Math.min((recordingSeconds / currentLimit) * 100, 100)}%` }}
               />
             </div>
+
+            {isPro ? (
+              <span className="text-[10px] font-sans font-bold text-oxide-red uppercase tracking-wider">PRO 30:00</span>
+            ) : (
+              <button onClick={() => { setUpsellMode('UPGRADE'); setShowUpsell(true); }} className="text-[9px] font-sans font-bold text-paper-muted hover:text-oxide-red transition-colors uppercase tracking-wider whitespace-nowrap">
+                Limit 2:00 <span className="underline decoration-oxide-red">Upgrade</span>
+              </button>
+            )}
           </div>
+
+          {/* 4. Integrations Strip */}
+          <div className="w-full py-4 border-t border-ink-border flex justify-center mt-2">
+            <div className="flex gap-4 md:gap-6 opacity-60 hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest font-bold text-paper-muted">
+                <QueueListIcon className="w-3 h-3" /> Notion
+              </div>
+              <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest font-bold text-paper-muted">
+                <ShareIcon className="w-3 h-3" /> LinkedIn
+              </div>
+              <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest font-bold text-paper-muted">
+                <GlobeAltIcon className="w-3 h-3" /> WordPress
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        {/* 2. Integrations (Moved Up) */}
-        <div className="w-full max-w-2xl py-6 border-y border-ink-border/50">
-          <div className="flex flex-wrap justify-center gap-4">
-            <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-paper-muted self-center mr-2">Integrate:</span>
-            <button onClick={() => setShowUpsell(true)} className="text-[10px] font-sans font-bold uppercase tracking-wider text-paper-muted hover:text-oxide-red transition-colors flex items-center gap-1.5">
-              <QueueListIcon className="w-3 h-3" /> Notion
-            </button>
-            <span className="text-ink-border self-center">|</span>
-            <button onClick={() => setShowUpsell(true)} className="text-[10px] font-sans font-bold uppercase tracking-wider text-paper-muted hover:text-oxide-red transition-colors flex items-center gap-1.5">
-              <ShareIcon className="w-3 h-3" /> LinkedIn
-            </button>
-            <span className="text-ink-border self-center">|</span>
-            <button onClick={() => setShowUpsell(true)} className="text-[10px] font-sans font-bold uppercase tracking-wider text-paper-muted hover:text-oxide-red transition-colors flex items-center gap-1.5">
-              <GlobeAltIcon className="w-3 h-3" /> WordPress
-            </button>
-          </div>
-        </div>
-
-        {/* 3. Configuration Deck */}
-        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* 5. Configuration Deck */}
+        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl border-t border-ink-border pt-8">
           {/* Format Selection */}
           <div className="space-y-3">
             <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-paper-muted flex items-center gap-2">
@@ -370,7 +432,7 @@ export default function Home() {
                   key={t}
                   onClick={() => setConfig({ ...config, docType: t as DocType })}
                   className={`
-                    h-9 w-full btn-instrument flex items-center justify-center text-[9px]
+                    h-10 w-full btn-instrument flex items-center justify-center text-[10px]
                     ${config.docType === t ? 'btn-instrument-active' : ''}
                   `}
                 >
@@ -391,7 +453,7 @@ export default function Home() {
                   key={s}
                   onClick={() => setConfig({ ...config, style: s as WritingStyle })}
                   className={`
-                    h-9 w-full btn-instrument flex items-center justify-center text-[9px]
+                    h-10 w-full btn-instrument flex items-center justify-center text-[10px]
                     ${config.style === s ? 'btn-instrument-active' : ''}
                   `}
                 >
@@ -401,43 +463,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-
-        {/* 4. Output Display */}
-        {(result || isRecording || isProcessing) && (
-          <div ref={resultRef} className="w-full animate-in fade-in duration-700 slide-in-from-bottom-8 border-t border-ink-border pt-12">
-            <div className="flex justify-between items-center mb-6">
-              <span className="text-[10px] uppercase tracking-widest text-paper-muted font-bold">Generated Output</span>
-              {result && (
-                <button onClick={copyToClipboard} className="text-[10px] uppercase tracking-widest text-oxide-red hover:text-white transition-colors flex items-center gap-1 font-bold">
-                  [ Copy ]
-                </button>
-              )}
-            </div>
-
-            <div className="bg-ink-surface/30 p-8 rounded-sm border border-ink-border relative">
-              {(isRecording || isProcessing) && !result && (
-                <div className="space-y-4 opacity-70">
-                  <div className="flex items-center gap-3 text-oxide-red font-mono text-xs uppercase tracking-widest">
-                    {isProcessing ? '/// PROCESSING DATA...' : '/// RECORDING AUDIO...'}
-                    <MechanicalMeter isActive={isRecording} volume={volume} />
-                  </div>
-                  <p className="text-lg text-paper-text leading-relaxed font-serif">
-                    {finalTranscript} <span className="text-paper-muted">{transcript}</span>
-                  </p>
-                </div>
-              )}
-
-              {result && (
-                <div className="prose prose-invert max-w-none">
-                  <p className="whitespace-pre-wrap leading-relaxed font-serif text-lg text-paper-text">
-                    {result}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
       </main>
 
       {/* Footer */}
@@ -456,6 +481,7 @@ export default function Home() {
         isOpen={showUpsell}
         onClose={() => setShowUpsell(false)}
         onUpgrade={handleUpgrade}
+        mode={upsellMode}
       />
     </div>
   );
