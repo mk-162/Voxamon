@@ -3,7 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ProcessingConfig } from "@/types";
 
-const MODEL_NAME = 'gemini-1.5-flash-8b';
+const MODEL_NAME = 'gemini-2.0-flash';
 
 export async function processTranscript(
     transcript: string,
@@ -11,9 +11,9 @@ export async function processTranscript(
 ): Promise<string> {
     if (!transcript.trim()) return '';
 
-    const apiKey = process.env.VITE_API_KEY; // We'll keep the name for now or update it in Vercel
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.VITE_API_KEY;
     if (!apiKey) {
-        throw new Error("API Key (VITE_API_KEY) not found in environment variables");
+        throw new Error("API Key (GOOGLE_API_KEY) not found in environment variables");
     }
 
     const ai = new GoogleGenerativeAI(apiKey);
@@ -21,7 +21,14 @@ export async function processTranscript(
 
     const prompt = `
     You are an expert ghostwriter and editor. 
-    Your task is to take a raw, potentially rambling stream-of-consciousness voice transcript and convert it into a structured, valuable asset.
+    Your task is to take a raw voice transcript and process it into a clean, formatted document.
+
+    CRITICAL INSTRUCTIONS:
+    1. OUTPUT ONLY THE FINAL CONTENT. 
+    2. DO NOT include any preamble like "Here is the summary" or "Sure".
+    3. DO NOT output the "Input Transcript" itself.
+    4. Apply the requested Format and Tone strictly.
+    5. FORMATTING: Use proper markdown with LINE BREAKS. Each bullet point MUST be on its own line with a blank line before the list. Use "- " for bullets, NOT "• ".
 
     Input Transcript: "${transcript}"
 
@@ -30,24 +37,17 @@ export async function processTranscript(
     - Detail Level: ${config.length}
     - Tone/Style: ${config.style}
 
-    Guidelines based on format:
-    - SUMMARY: Create a concise, high-level overview of the main ideas and takeaways.
-    - DESIGN_FEEDBACK: Use sections like "Visuals", "UX/Usability", "Copy", and "Action Items".
-    - MEETING_NOTES: Extract "Key Points", "Decisions Made", and "Action Items".
-    - BUG_REPORT: Format as "Observed Behavior", "Expected Behavior", "Steps to Reproduce" (inferred).
-    - EMAIL_DRAFT: Meaningful subject line, body, sign-off.
-    - LINKEDIN_POST: Professional but engaging hook, short paragraphs, appropriate emojis, 3-5 hashtags at the end.
-    - TWEET_THREAD: Series of short tweets numbered (1/x), punchy, viral style, no hashtags in middle of text.
-    - BLOG_POST: Catchy Title, Introduction, H2 Headers for sections, Conclusion.
+    Format Guidelines:
+    - SUMMARY: Use markdown bullet points (dash format: "- item"). Each bullet on its own line. No intro paragraph.
+    - EMAIL_DRAFT: Subject line, then Body.
+    - LINKEDIN_POST: Hook, Body, Hashtags.
+    - MEETING_NOTES: Actions, Decisions as bullet lists.
 
-    Guidelines based on style:
-    - CONVERSATIONAL: Write as if speaking naturally to a friend or colleague. Warm, accessible, and not overly stiff.
-    - PROFESSIONAL: Polished, business-appropriate, and objective.
-    - CREATIVE: Expressive, evocative, and compelling.
-    - DIRECT: Concise, to the point, no fluff.
-    - TECHNICAL: Precise, detailed, and using appropriate terminology.
-    - OBSERVED BEHAVIOR: Output ONLY the requested format.
-  `;
+    Tone Guidelines:
+    - CONVERSATIONAL: Natural, warm.
+    - PROFESSIONAL: Business-appropriate, objective.
+    - DIRECT: Concise, no fluff.
+    `;
 
     try {
         const result = await model.generateContent(prompt);

@@ -1,10 +1,23 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { processTranscript } from './actions/gemini';
-import { DocType, WritingStyle, ProcessingConfig } from '@/types';
+import { DocType, WritingStyle, ProcessingConfig, HistoryItem } from '@/types';
+import ReactMarkdown from 'react-markdown';
 import { createClient } from '@/lib/supabase/client';
+import IntegrationGrid from '@/components/IntegrationGrid';
+import FeatureCards from '@/components/FeatureCards';
+import HistorySidebar from '@/components/HistorySidebar';
+import PricingModal from '@/components/PricingModal';
+import {
+  getLocalHistory,
+  saveLocalHistory,
+  deleteLocalHistory,
+  getCloudHistory,
+  saveCloudHistory,
+  deleteCloudHistory,
+} from '@/lib/history';
 import {
   LockClosedIcon,
   StarIcon,
@@ -16,33 +29,20 @@ import {
   ClockIcon,
   ArchiveBoxIcon,
   ChevronDownIcon,
-  SparklesIcon
+  SparklesIcon,
+  UserCircleIcon
 } from '@heroicons/react/24/solid';
 
 // --- Components ---
 
-const MechanicalMeter = ({ isActive }: { isActive: boolean }) => {
-  const [bars, setBars] = useState<number[]>(new Array(6).fill(1));
-
-  useEffect(() => {
-    let interval: any;
-    if (isActive) {
-      interval = setInterval(() => {
-        setBars(prev => prev.map(() => Math.max(2, Math.floor(Math.random() * 10))));
-      }, 100);
-    } else {
-      setBars(new Array(6).fill(1));
-    }
-    return () => clearInterval(interval);
-  }, [isActive]);
-
+const MechanicalMeter = ({ audioLevels }: { audioLevels: number[] }) => {
   return (
-    <div className="flex items-end gap-0.5 h-4">
-      {bars.map((height, i) => (
+    <div className="flex items-end gap-[3px] h-6">
+      {audioLevels.map((level, i) => (
         <div
           key={i}
-          className="w-1 bg-oxide-red transition-all duration-75 ease-out rounded-t-sm"
-          style={{ height: `${height * 10}%`, opacity: isActive ? 1 : 0.3 }}
+          className="w-1.5 bg-oxide-red transition-all duration-75 ease-out rounded-t-sm"
+          style={{ height: `${Math.max(15, level)}%`, opacity: level > 10 ? 1 : 0.4 }}
         />
       ))}
     </div>
@@ -58,7 +58,7 @@ const UpsellModal = ({ isOpen, onClose, onUpgrade, mode = 'UPGRADE' }: { isOpen:
         className="absolute inset-0 bg-ink-base/90 backdrop-blur-md transition-opacity"
         onClick={onClose}
       />
-      <div className="relative bg-ink-surface border border-ink-border rounded-sm max-w-md w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 font-sans">
+      <div className="relative bg-ink-surface border border-ink-border  max-w-md w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 font-sans">
         {/* Header */}
         <div className="bg-ink-base p-6 text-center border-b border-ink-border">
           <div className="mx-auto w-10 h-10 border border-ink-border rounded-full flex items-center justify-center mb-4 text-paper-muted">
@@ -107,7 +107,7 @@ const UpsellModal = ({ isOpen, onClose, onUpgrade, mode = 'UPGRADE' }: { isOpen:
         <div className="p-4 bg-ink-base border-t border-ink-border flex flex-col gap-3">
           <button
             onClick={onUpgrade}
-            className="w-full bg-oxide-red hover:bg-orange-700 text-white font-medium py-3 rounded-sm transition-colors flex items-center justify-center gap-2 text-sm uppercase tracking-wider shadow-lg shadow-oxide-red/20"
+            className="w-full bg-oxide-red hover:bg-orange-700 text-white font-medium py-3  transition-colors flex items-center justify-center gap-2 text-sm uppercase tracking-wider shadow-lg shadow-oxide-red/20"
           >
             <StarIcon className="w-4 h-4" />
             Upgrade - $9/mo
@@ -126,19 +126,36 @@ const UpsellModal = ({ isOpen, onClose, onUpgrade, mode = 'UPGRADE' }: { isOpen:
 
 const CopyButton = ({ text }: { text: string }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const handleCopy = (mode: 'TEXT' | 'MARKDOWN') => {
-    navigator.clipboard.writeText(text);
+  const stripMarkdown = (md: string): string => {
+    return md
+      .replace(/#{1,6}\s?/g, '')           // headers
+      .replace(/\*\*(.+?)\*\*/g, '$1')     // bold
+      .replace(/\*(.+?)\*/g, '$1')         // italic
+      .replace(/_(.+?)_/g, '$1')           // italic alt
+      .replace(/`(.+?)`/g, '$1')           // inline code
+      .replace(/^\s*[-*+]\s/gm, '• ')      // bullets
+      .replace(/^\s*\d+\.\s/gm, '')        // numbered lists
+      .replace(/\[(.+?)\]\(.+?\)/g, '$1')  // links
+      .trim();
+  };
+
+  const handleCopy = async (mode: 'TEXT' | 'MARKDOWN') => {
+    const content = mode === 'TEXT' ? stripMarkdown(text) : text;
+    await navigator.clipboard.writeText(content);
     setIsOpen(false);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <div className="relative">
       <button
         onClick={() => handleCopy('TEXT')}
-        className="flex items-center gap-2 bg-oxide-red hover:bg-orange-700 text-white text-[10px] uppercase tracking-widest font-bold px-4 py-2 rounded-sm transition-colors"
+        className="flex items-center gap-2 bg-oxide-red hover:bg-orange-700 text-white text-[10px] uppercase tracking-widest font-bold px-4 py-2  transition-colors"
       >
-        Copy
+        {copied ? 'Copied!' : 'Copy'}
         <div
           onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
           className="border-l border-white/20 pl-2 ml-1 hover:bg-white/10 h-full flex items-center"
@@ -148,7 +165,7 @@ const CopyButton = ({ text }: { text: string }) => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-32 bg-ink-surface border border-ink-border shadow-xl rounded-sm z-50 flex flex-col">
+        <div className="absolute right-0 bottom-full mb-1 w-32 bg-ink-surface border border-ink-border shadow-xl  z-50 flex flex-col">
           <button onClick={() => handleCopy('TEXT')} className="text-left px-3 py-2 text-[10px] uppercase font-bold text-paper-muted hover:text-paper-text hover:bg-ink-base transition-colors">
             Plain Text
           </button>
@@ -161,12 +178,83 @@ const CopyButton = ({ text }: { text: string }) => {
   );
 };
 
+// All available format types
+const ALL_FORMATS: { key: DocType; label: string }[] = [
+  { key: 'SUMMARY', label: 'Summary' },
+  { key: 'EMAIL_DRAFT', label: 'Email' },
+  { key: 'MEETING_NOTES', label: 'Meeting Notes' },
+  { key: 'LINKEDIN_POST', label: 'LinkedIn Post' },
+  { key: 'TWEET_THREAD', label: 'Tweet Thread' },
+  { key: 'BLOG_POST', label: 'Blog Post' },
+  { key: 'NEWSLETTER', label: 'Newsletter' },
+  { key: 'PRESS_RELEASE', label: 'Press Release' },
+  { key: 'PRODUCT_DESCRIPTION', label: 'Product Description' },
+  { key: 'VIDEO_SCRIPT', label: 'Video Script' },
+  { key: 'PODCAST_OUTLINE', label: 'Podcast Outline' },
+  { key: 'SALES_PITCH', label: 'Sales Pitch' },
+  { key: 'BUG_REPORT', label: 'Bug Report' },
+  { key: 'DESIGN_FEEDBACK', label: 'Design Feedback' },
+  { key: 'BRAINSTORM', label: 'Brainstorm' },
+];
+
+// Recording prompts for each format
+const RECORDING_PROMPTS: Record<DocType, { title: string; prompt: string }> = {
+  'SUMMARY': { title: 'Summary', prompt: 'Explain it like you would to a colleague.' },
+  'EMAIL_DRAFT': { title: 'Email', prompt: 'Say who it\'s for and what you want.' },
+  'MEETING_NOTES': { title: 'Notes', prompt: 'Don\'t worry about structure. Just talk.' },
+  'LINKEDIN_POST': { title: 'Social', prompt: 'Share the idea, not the polish.' },
+  'TWEET_THREAD': { title: 'Thread', prompt: 'What\'s the story you want to tell?' },
+  'BLOG_POST': { title: 'Blog', prompt: 'Talk through your main points naturally.' },
+  'NEWSLETTER': { title: 'Newsletter', prompt: 'What do your readers need to know?' },
+  'PRESS_RELEASE': { title: 'Press', prompt: 'What\'s the news and why does it matter?' },
+  'PRODUCT_DESCRIPTION': { title: 'Product', prompt: 'Describe what it does and who it\'s for.' },
+  'VIDEO_SCRIPT': { title: 'Script', prompt: 'Walk through it like you\'re presenting.' },
+  'PODCAST_OUTLINE': { title: 'Podcast', prompt: 'What topics do you want to cover?' },
+  'SALES_PITCH': { title: 'Pitch', prompt: 'What problem does this solve?' },
+  'BUG_REPORT': { title: 'Bug', prompt: 'Describe what happened and what you expected.' },
+  'DESIGN_FEEDBACK': { title: 'Feedback', prompt: 'Say what works and what doesn\'t.' },
+  'BRAINSTORM': { title: 'Ideas', prompt: 'Let your thoughts flow freely.' },
+};
+
+const FormatModal = ({ isOpen, onClose, onSelect, currentFormat }: { isOpen: boolean; onClose: () => void; onSelect: (format: DocType) => void; currentFormat: DocType }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-ink-base/90 backdrop-blur-md" onClick={onClose} />
+      <div className="relative bg-ink-surface border border-ink-border  max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="bg-ink-base p-4 border-b border-ink-border flex justify-between items-center">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-paper-text">All Formats</h2>
+          <button onClick={onClose} className="text-paper-muted hover:text-paper-text text-xs">✕</button>
+        </div>
+        <div className="p-4 grid grid-cols-3 gap-2 max-h-[60vh] overflow-y-auto">
+          {ALL_FORMATS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => { onSelect(f.key); onClose(); }}
+              className={`p-3 text-[10px] font-bold uppercase tracking-wide border  transition-all text-center
+                ${currentFormat === f.key
+                  ? 'bg-oxide-red text-white border-oxide-red'
+                  : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'}
+              `}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter();
-  const supabase = createClient();
+  const searchParams = useSearchParams();
+  const supabase = useMemo(() => createClient(), []);
   const [user, setUser] = useState<any>(null);
+  const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
 
   // App State
   // 'CONFIG' | 'RECORDING' | 'GENERATING' | 'RESULT'
@@ -181,7 +269,14 @@ export default function Home() {
   const [isPro, setIsPro] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [showUpsell, setShowUpsell] = useState(false);
+  const [showFormats, setShowFormats] = useState(false);
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
   const [upsellMode, setUpsellMode] = useState<'UPGRADE' | 'HISTORY'>('UPGRADE');
+  const [showHistory, setShowHistory] = useState(false);
+  const [showRecordingSettings, setShowRecordingSettings] = useState(false);
+  const [pastFreeLimit, setPastFreeLimit] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   // Configuration
   const [config, setConfig] = useState<ProcessingConfig>({
@@ -192,84 +287,163 @@ export default function Home() {
 
   const recognitionRef = useRef<any>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // Audio levels for equalizer
+  const [audioLevels, setAudioLevels] = useState<number[]>([10, 10, 10, 10, 10]);
 
   // Constants
   const FREE_LIMIT = 120; // 2 minutes
   const PRO_LIMIT = 1800; // 30 minutes
   const currentLimit = isPro ? PRO_LIMIT : FREE_LIMIT;
 
-  // Auth Check
+  // Auth Check & Load History
   useEffect(() => {
     const checkUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUser(user);
         const { data } = await supabase.from('profiles').select('is_pro').eq('id', user.id).single();
-        if (data) setIsPro(data.is_pro);
+        if (data) {
+          setIsPro(data.is_pro);
+          // Load cloud history for Pro users
+          if (data.is_pro) {
+            const cloudHistory = await getCloudHistory(user.id);
+            setHistory(cloudHistory);
+          }
+        }
+      }
+      // Load local history for free users (or as fallback)
+      if (!user) {
+        setHistory(getLocalHistory());
       }
     };
     checkUser();
   }, [supabase]);
 
-  // Timer Logic
+  // Load local history on mount for non-logged-in users
+  useEffect(() => {
+    if (!user && !isPro) {
+      setHistory(getLocalHistory());
+    }
+  }, [user, isPro]);
+
+  // Check for upgrade query param (redirect from login)
+  useEffect(() => {
+    if (searchParams.get('upgrade') === 'true') {
+      setShowPricing(true);
+      // Clean up the URL
+      window.history.replaceState({}, '', '/');
+    }
+  }, [searchParams]);
+
+  // Timer Logic - NO auto-stop, just track elapsed time
   useEffect(() => {
     let interval: any;
     if (appState === 'RECORDING') {
       interval = setInterval(() => {
         setRecordingSeconds(prev => {
-          if (prev >= currentLimit) {
-            stopRecording();
-            if (!isPro) {
-              setUpsellMode('UPGRADE');
-              setShowUpsell(true);
-            }
-            return prev;
+          const newVal = prev + 1;
+          // Mark when user exceeds free limit (for upgrade nudge later)
+          if (!isPro && newVal >= FREE_LIMIT && !pastFreeLimit) {
+            setPastFreeLimit(true);
           }
-          return prev + 1;
+          return newVal;
         });
       }, 1000);
     } else {
       setRecordingSeconds(0);
+      setPastFreeLimit(false);
     }
     return () => clearInterval(interval);
-  }, [appState, currentLimit, isPro]);
+  }, [appState, isPro, pastFreeLimit]);
 
   // Speech Recognition
   useEffect(() => {
-    if (typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
+    if (typeof window !== 'undefined') {
+      const isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+      setSpeechSupported(isSupported);
 
-      recognitionRef.current.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalChunk = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalChunk += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
+      if (isSupported) {
+        const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.lang = 'en-US';
+
+        recognitionRef.current.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalChunk = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalChunk += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
           }
-        }
-        if (finalChunk) setFinalTranscript(prev => prev + ' ' + finalChunk);
-        setTranscript(interimTranscript);
-      };
+          if (finalChunk) setFinalTranscript(prev => prev + ' ' + finalChunk);
+          setTranscript(interimTranscript);
+        };
+      }
     }
   }, []);
 
-  const startRecording = () => {
+  const startRecording = async () => {
     setFinalTranscript('');
     setTranscript('');
     setResult('');
     setError(null);
+
+    // Start speech recognition
     recognitionRef.current?.start();
     setAppState('RECORDING');
+
+    // Start audio visualization
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      audioContextRef.current = new AudioContext();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 32;
+
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      source.connect(analyserRef.current);
+
+      const updateLevels = () => {
+        if (!analyserRef.current) return;
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        // Take 5 frequency bands and normalize to 0-100
+        const levels = Array.from(dataArray.slice(0, 5)).map(v => (v / 255) * 100);
+        setAudioLevels(levels);
+
+        animationFrameRef.current = requestAnimationFrame(updateLevels);
+      };
+      updateLevels();
+    } catch (err) {
+      console.warn('Audio visualization not available:', err);
+    }
   };
 
   const stopRecording = () => {
     recognitionRef.current?.stop();
+
+    // Clean up audio visualization
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+    setAudioLevels([10, 10, 10, 10, 10]);
+
     setAppState('GENERATING');
     handleProcess();
   };
@@ -292,6 +466,19 @@ export default function Home() {
       setResult(content);
       setAppState('RESULT');
 
+      // Save to history
+      try {
+        if (isPro && user) {
+          const saved = await saveCloudHistory(user.id, text, content, config);
+          if (saved) setHistory(prev => [saved, ...prev].slice(0, 100));
+        } else {
+          const saved = saveLocalHistory(text, content, config);
+          setHistory(prev => [saved, ...prev].slice(0, 5));
+        }
+      } catch (historyError) {
+        console.warn('Failed to save to history:', historyError);
+      }
+
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 500);
@@ -304,50 +491,108 @@ export default function Home() {
   };
 
   const handleUpgrade = () => {
-    alert("Redirecting to Lemon Squeezy Checkout...");
     setShowUpsell(false);
+    setShowPricing(true);
   };
 
   const handleViewOutput = () => {
-    if (isPro) {
-      alert("Opening History Sidebar (Coming Soon)");
+    setShowHistory(true);
+  };
+
+  const handleSelectHistoryItem = (item: HistoryItem) => {
+    setResult(item.result);
+    setFinalTranscript(item.transcript);
+    setConfig(item.config);
+    setAppState('RESULT');
+    setShowHistory(false);
+  };
+
+  const handleDeleteHistoryItem = async (id: string) => {
+    if (isPro && user) {
+      const success = await deleteCloudHistory(id);
+      if (success) setHistory(prev => prev.filter(item => item.id !== id));
     } else {
-      setUpsellMode('HISTORY');
-      setShowUpsell(true);
+      deleteLocalHistory(id);
+      setHistory(prev => prev.filter(item => item.id !== id));
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col font-serif bg-ink-base text-paper-text selection:bg-oxide-red selection:text-white overflow-x-hidden">
+    <div className="min-h-screen flex flex-col font-serif bg-ink-base text-paper-text selection:bg-oxide-red/20 selection:text-oxide-red overflow-x-hidden grain-texture">
 
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-ink-base/90 backdrop-blur-md border-b border-ink-border h-16">
         <div className="w-full max-w-5xl mx-auto px-6 h-full flex items-center justify-between">
           <div className="flex items-baseline gap-4">
-            <h1 className="text-2xl font-serif tracking-tight cursor-default">Vocalize.</h1>
+            <h1 className="text-2xl font-serif tracking-tight cursor-default">Voxacom<span className="text-oxide-red">.</span></h1>
             <span className="hidden md:inline text-[10px] font-sans uppercase tracking-[0.2em] text-paper-muted opacity-60">System v2.0</span>
           </div>
 
           <nav className="flex items-center gap-6 text-[10px] font-sans font-bold uppercase tracking-[0.15em]">
             <button onClick={handleViewOutput} className="hidden md:flex items-center gap-1.5 hover:text-oxide-red transition-colors text-paper-muted">
-              <ArchiveBoxIcon className="w-3 h-3" /> View Data
+              <ArchiveBoxIcon className="w-3 h-3" /> History
             </button>
 
             {!isPro && (
-              <button onClick={() => { setUpsellMode('UPGRADE'); setShowUpsell(true); }} className="text-oxide-red hover:text-white transition-colors flex items-center gap-1">
+              <button onClick={() => setShowPricing(true)} className="text-oxide-red hover:text-white transition-colors flex items-center gap-1">
                 <StarIcon className="w-3 h-3" /> Upgrade
               </button>
             )}
 
-            {user ? (
-              <button onClick={() => supabase.auth.signOut().then(() => setUser(null))} className="text-paper-muted hover:text-paper-text transition-colors">
-                Log Out
+            {/* Avatar Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowAvatarMenu(!showAvatarMenu)}
+                className="w-8 h-8 rounded-full border border-paper-muted/50 flex items-center justify-center hover:border-paper-text hover:bg-ink-surface transition-colors"
+              >
+                <UserCircleIcon className="w-5 h-5 text-paper-muted" />
               </button>
-            ) : (
-              <button onClick={() => router.push('/login')} className="bg-paper-text text-ink-base px-5 py-1.5 rounded-sm hover:bg-white transition-colors">
-                Log In
-              </button>
-            )}
+
+              {showAvatarMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowAvatarMenu(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-ink-surface border border-ink-border  shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    {user ? (
+                      <>
+                        <div className="px-4 py-3 border-b border-ink-border">
+                          <p className="text-xs text-paper-muted truncate">{user.email}</p>
+                          {isPro && (
+                            <span className="text-[9px] uppercase tracking-widest font-bold text-oxide-red">Pro</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setShowAvatarMenu(false); router.push('/account'); }}
+                          className="w-full px-4 py-3 text-left text-xs uppercase tracking-widest font-bold text-paper-muted hover:bg-ink-base hover:text-paper-text transition-colors flex items-center gap-2"
+                        >
+                          <span className="w-4 h-4 text-center">👤</span> Account
+                        </button>
+                        <button
+                          onClick={() => { setShowAvatarMenu(false); supabase.auth.signOut().then(() => { setUser(null); setIsPro(false); }); }}
+                          className="w-full px-4 py-3 text-left text-xs uppercase tracking-widest font-bold text-paper-muted hover:bg-ink-base hover:text-oxide-red transition-colors flex items-center gap-2 border-t border-ink-border"
+                        >
+                          <span className="w-4 h-4 text-center">🚪</span> Log Out
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => { setShowAvatarMenu(false); router.push('/login'); }}
+                          className="w-full px-4 py-3 text-left text-xs uppercase tracking-widest font-bold text-paper-muted hover:bg-ink-base hover:text-oxide-red transition-colors flex items-center gap-2"
+                        >
+                          <span className="w-4 h-4 text-center">🔑</span> Log In
+                        </button>
+                        <button
+                          onClick={() => { setShowAvatarMenu(false); /* TODO: Settings page */ }}
+                          className="w-full px-4 py-3 text-left text-xs uppercase tracking-widest font-bold text-paper-muted hover:bg-ink-base hover:text-paper-text transition-colors flex items-center gap-2 border-t border-ink-border"
+                        >
+                          <span className="w-4 h-4 text-center">⚙️</span> Settings
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </nav>
         </div>
       </header>
@@ -355,15 +600,20 @@ export default function Home() {
       {/* Main Content */}
       <main className="flex-1 w-full max-w-4xl mx-auto pt-24 pb-20 px-6 flex flex-col items-center gap-6">
 
-        {/* Hero Copy (Simplified) */}
-        <div className="text-center space-y-2 mb-4 animate-in fade-in slide-in-from-top-4 duration-700">
-          <p className="text-3xl md:text-4xl text-paper-text font-light italic">
-            Stop typing. Just talk.
-          </p>
-        </div>
+        {/* Hero Copy (Simplified) - Hidden in RESULT state */}
+        {appState !== 'RESULT' && (
+          <div className="text-center space-y-3 mb-4 animate-in fade-in slide-in-from-top-4 duration-700">
+            <p className="text-3xl md:text-4xl text-paper-text font-light italic">
+              Stop typing. Just talk.
+            </p>
+            <p className="text-sm md:text-base text-paper-muted font-sans">
+              Turn spoken thoughts into structured, sendable content
+            </p>
+          </div>
+        )}
 
         {/* --- THE INSTRUMENT BOX (Unified Interface) --- */}
-        <div className="w-full bg-ink-surface/30 border border-ink-border/50 rounded-sm relative overflow-hidden transition-all duration-500 min-h-[400px] flex flex-col">
+        <div className="w-full bg-ink-surface border border-ink-border  relative overflow-hidden transition-all duration-500 min-h-[400px] flex flex-col">
 
           {/* STATE: GENERATING ANIMATION */}
           {appState === 'GENERATING' && (
@@ -373,41 +623,11 @@ export default function Home() {
                 <SparklesIcon className="w-12 h-12 text-oxide-red animate-spin-slow" />
               </div>
               <p className="mt-6 text-xs font-mono uppercase tracking-[0.3em] text-paper-muted animate-pulse">
-                Structuring Thought...
+                Processing your feedback...
               </p>
             </div>
           )}
 
-          {/* HEADER OF BOX: Timer & Controls */}
-          <div className="h-14 border-b border-ink-border flex items-center justify-between px-6 bg-ink-surface/50">
-            <div className="flex items-center gap-4">
-              {/* Timer */}
-              <span className={`text-[12px] font-mono ${appState === 'RECORDING' ? 'text-oxide-red font-bold animate-pulse' : 'text-paper-muted'}`}>
-                {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
-              </span>
-
-              {/* Progress Bar */}
-              <div className="w-24 md:w-48 h-1 bg-ink-base border border-ink-border rounded-full relative overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-1000 ease-linear ${recordingSeconds > FREE_LIMIT * 0.9 && !isPro ? 'bg-red-500 animate-pulse' : 'bg-oxide-red'}`}
-                  style={{ width: `${Math.min((recordingSeconds / currentLimit) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
-
-            {/* State Indicators */}
-            <div className="flex items-center gap-3">
-              {appState === 'RECORDING' && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-oxide-red/10 border border-oxide-red/20 rounded-full">
-                  <div className="w-1.5 h-1.5 rounded-full bg-oxide-red animate-pulse" />
-                  <span className="text-[9px] uppercase tracking-widest font-bold text-oxide-red">Live Input</span>
-                </div>
-              )}
-              {!isPro && appState !== 'RECORDING' && (
-                <span className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">2:00 Limit</span>
-              )}
-            </div>
-          </div>
 
           {/* BODY OF BOX */}
           <div className="flex-1 relative flex flex-col">
@@ -415,68 +635,183 @@ export default function Home() {
             {/* 1. CONFIG STATE (Ready) */}
             {appState === 'CONFIG' && (
               <div className="flex-1 flex flex-col md:flex-row animate-in fade-in duration-500">
-                {/* LEFT: Record Trigger */}
-                <div className="flex-1 flex flex-col items-center justify-center p-8 border-r border-ink-border/50">
-                  <div className="relative group cursor-pointer" onClick={startRecording}>
-                    <div className="absolute -inset-8 bg-oxide-red/5 rounded-full blur-xl group-hover:bg-oxide-red/10 transition-all duration-500" />
-                    <button
-                      className="relative w-24 h-24 rounded-full bg-ink-surface border border-ink-border shadow-2xl flex items-center justify-center group-hover:scale-105 group-hover:border-paper-muted transition-all duration-300"
-                    >
-                      <MicrophoneIcon className="w-8 h-8 text-paper-muted group-hover:text-paper-text transition-colors" />
-                    </button>
+                {/* LEFT: Configuration Grid */}
+                <div className="flex-1 flex flex-col border-r border-ink-border/50">
+                  <div className="px-6 py-3 border-b border-ink-border/50">
+                    <h2 className="text-[10px] font-sans font-bold uppercase tracking-widest text-paper-muted">
+                      <span className="text-oxide-red">1.</span> Set context
+                    </h2>
                   </div>
-                  <p className="mt-8 text-sm font-serif italic text-paper-muted">"Tap to start..."</p>
+                  <div className="flex-1 p-6 grid grid-cols-2 gap-4 content-start">
+                    {/* Doc Type Selector */}
+                    <div className="col-span-2 space-y-2">
+                      <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Format</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(() => {
+                          // Default formats and their internal keys
+                          const defaultFormats: { key: DocType; label: string }[] = [
+                            { key: 'SUMMARY', label: 'SUMMARY' },
+                            { key: 'EMAIL_DRAFT', label: 'EMAIL' },
+                            { key: 'MEETING_NOTES', label: 'NOTES' },
+                            { key: 'LINKEDIN_POST', label: 'SOCIAL' },
+                          ];
+
+                          // Check if current selection is outside defaults
+                          const isCustomFormat = !defaultFormats.some(f => f.key === config.docType);
+
+                          // Build display formats: if custom selected, put it first and remove last default
+                          let displayFormats: { key: DocType; label: string }[] = [...defaultFormats];
+                          if (isCustomFormat) {
+                            const customLabel = ALL_FORMATS.find(f => f.key === config.docType)?.label || config.docType;
+                            displayFormats = [
+                              { key: config.docType, label: customLabel.toUpperCase() },
+                              ...defaultFormats.slice(0, 3)
+                            ];
+                          }
+
+                          return displayFormats.map((format) => {
+                            const isActive = config.docType === format.key;
+                            return (
+                              <button
+                                key={format.key}
+                                onClick={() => setConfig({ ...config, docType: format.key })}
+                                className={`h-10 text-[9px] font-bold uppercase tracking-wide border  transition-all
+                                ${isActive
+                                    ? 'bg-oxide-red text-white border-oxide-red'
+                                    : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'}
+                              `}
+                              >
+                                {format.label}
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                      <button
+                        onClick={() => setShowFormats(true)}
+                        className="w-full text-center text-[9px] uppercase tracking-widest text-paper-muted hover:text-oxide-red transition-colors pt-2"
+                      >
+                        + More Formats
+                      </button>
+                    </div>
+
+                    {/* Style Selector */}
+                    <div className="col-span-2 space-y-2 mt-2">
+                      <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Tone</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['CASUAL', 'PROFESSIONAL', 'DIRECT', 'CREATIVE'].map((s) => {
+                          const styleMap: any = { 'CASUAL': 'CONVERSATIONAL', 'PROFESSIONAL': 'PROFESSIONAL', 'DIRECT': 'DIRECT', 'CREATIVE': 'CREATIVE' };
+                          const isActive = config.style === styleMap[s];
+                          return (
+                            <button
+                              key={s}
+                              onClick={() => setConfig({ ...config, style: styleMap[s] })}
+                              className={`h-10 text-[9px] font-bold uppercase tracking-wide border  transition-all
+                                                    ${isActive
+                                  ? 'bg-ink-surface border-oxide-red text-oxide-red'
+                                  : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'}
+                                                `}
+                            >
+                              {s}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Detail Level Slider */}
+                    <div className="col-span-2 space-y-3 mt-4 pt-4 border-t border-ink-border/50">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Detail Level</label>
+                        <span className="text-[9px] text-oxide-red font-bold uppercase">
+                          {config.length === 'VERY_CONCISE' && 'Very Concise'}
+                          {config.length === 'CONCISE' && 'Concise'}
+                          {config.length === 'BALANCED' && 'Balanced'}
+                          {config.length === 'DETAILED' && 'Detailed'}
+                          {config.length === 'VERY_DETAILED' && 'Very Detailed'}
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="range"
+                          min="0"
+                          max="4"
+                          value={['VERY_CONCISE', 'CONCISE', 'BALANCED', 'DETAILED', 'VERY_DETAILED'].indexOf(config.length)}
+                          onChange={(e) => {
+                            const levels: Array<'VERY_CONCISE' | 'CONCISE' | 'BALANCED' | 'DETAILED' | 'VERY_DETAILED'> = ['VERY_CONCISE', 'CONCISE', 'BALANCED', 'DETAILED', 'VERY_DETAILED'];
+                            setConfig({ ...config, length: levels[parseInt(e.target.value)] });
+                          }}
+                          className="w-full h-1 bg-ink-border rounded-full appearance-none cursor-pointer
+                          [&::-webkit-slider-thumb]:appearance-none
+                          [&::-webkit-slider-thumb]:w-4
+                          [&::-webkit-slider-thumb]:h-4
+                          [&::-webkit-slider-thumb]:rounded-full
+                          [&::-webkit-slider-thumb]:bg-oxide-red
+                          [&::-webkit-slider-thumb]:border-2
+                          [&::-webkit-slider-thumb]:border-ink-base
+                          [&::-webkit-slider-thumb]:shadow-lg
+                          [&::-webkit-slider-thumb]:cursor-pointer
+                          [&::-webkit-slider-thumb]:transition-transform
+                          [&::-webkit-slider-thumb]:hover:scale-110
+                          [&::-moz-range-thumb]:w-4
+                          [&::-moz-range-thumb]:h-4
+                          [&::-moz-range-thumb]:rounded-full
+                          [&::-moz-range-thumb]:bg-oxide-red
+                          [&::-moz-range-thumb]:border-2
+                          [&::-moz-range-thumb]:border-ink-base
+                          [&::-moz-range-thumb]:cursor-pointer"
+                        />
+                        <div className="flex justify-between mt-1">
+                          <span className="text-[8px] text-paper-muted">Concise</span>
+                          <span className="text-[8px] text-paper-muted">Detailed</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* RIGHT: Configuration Grid (2x2) */}
-                <div className="flex-1 p-8 grid grid-cols-2 gap-4 bg-ink-base/30">
-                  {/* Doc Type Selector */}
-                  <div className="col-span-2 space-y-2">
-                    <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Format</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {['SUMMARY', 'EMAIL', 'NOTES', 'SOCIAL'].map((t) => {
-                        // Mapping specific labels to internal types for cleaner UI
-                        const typeMap: any = { 'SUMMARY': 'SUMMARY', 'EMAIL': 'EMAIL_DRAFT', 'NOTES': 'MEETING_NOTES', 'SOCIAL': 'LINKEDIN_POST' };
-                        const isActive = config.docType === typeMap[t];
-                        return (
-                          <button
-                            key={t}
-                            onClick={() => setConfig({ ...config, docType: typeMap[t] })}
-                            className={`h-10 text-[9px] font-bold uppercase tracking-wide border rounded-sm transition-all
-                                                    ${isActive
-                                ? 'bg-oxide-red text-white border-oxide-red'
-                                : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'}
-                                                `}
-                          >
-                            {t}
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* RIGHT: Record Trigger */}
+                <div className="flex-1 flex flex-col">
+                  <div className="px-6 py-3 border-b border-ink-border/50">
+                    <h2 className="text-[10px] font-sans font-bold uppercase tracking-widest text-paper-muted">
+                      <span className="text-oxide-red">2.</span> Speak freely
+                    </h2>
                   </div>
-
-                  {/* Style Selector */}
-                  <div className="col-span-2 space-y-2 mt-2">
-                    <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Tone</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {['CASUAL', 'PRO', 'DIRECT', 'CREATIVE'].map((s) => {
-                        const styleMap: any = { 'CASUAL': 'CONVERSATIONAL', 'PRO': 'PROFESSIONAL', 'DIRECT': 'DIRECT', 'CREATIVE': 'CREATIVE' };
-                        const isActive = config.style === styleMap[s];
-                        return (
-                          <button
-                            key={s}
-                            onClick={() => setConfig({ ...config, style: styleMap[s] })}
-                            className={`h-10 text-[9px] font-bold uppercase tracking-wide border rounded-sm transition-all
-                                                    ${isActive
-                                ? 'bg-ink-surface border-oxide-red text-oxide-red'
-                                : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'}
-                                                `}
-                          >
-                            {s}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="flex-1 flex flex-col items-center justify-center p-8">
+                    {speechSupported === false ? (
+                      <div className="text-center">
+                        <div className="w-24 h-24 rounded-full bg-ink-base border border-ink-border flex items-center justify-center mb-6">
+                          <MicrophoneIcon className="w-8 h-8 text-paper-muted opacity-50" />
+                        </div>
+                        <p className="text-sm text-paper-muted mb-2">Speech recognition not supported</p>
+                        <p className="text-xs text-paper-muted/60 max-w-xs">
+                          Please use Chrome, Edge, or Safari for voice recording
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="relative group cursor-pointer" onClick={speechSupported ? startRecording : undefined}>
+                        <div className="absolute -inset-8 bg-oxide-red/5 rounded-full blur-xl group-hover:bg-oxide-red/10 transition-all duration-500" />
+                        <button
+                          disabled={speechSupported === null}
+                          className="relative w-24 h-24 rounded-full bg-ink-base border border-ink-border shadow-2xl flex items-center justify-center group-hover:scale-105 group-hover:border-paper-muted transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed animate-pulse"
+                        >
+                          <MicrophoneIcon className="w-8 h-8 text-paper-muted group-hover:text-paper-text transition-colors" />
+                        </button>
+                      </div>
+                    )}
+                    {speechSupported !== false && (
+                      <div className="mt-8 text-center">
+                        {speechSupported === null ? (
+                          <p className="text-sm font-serif italic text-paper-muted">Checking browser support...</p>
+                        ) : (
+                          <>
+                            <p className="text-base font-serif text-paper-text">Start talking. Take your time.</p>
+                            <p className="text-sm text-paper-muted mt-1">We'll handle the structure.</p>
+                            <p className="text-xs text-paper-muted/70 mt-2 uppercase tracking-widest">No signup. Free.</p>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -485,75 +820,234 @@ export default function Home() {
             {/* 2. RECORDING STATE */}
             {appState === 'RECORDING' && (
               <div className="flex-1 flex flex-col relative animate-in zoom-in-95 duration-300">
+                {/* Format Header with Settings Toggle */}
+                <div className="px-8 py-4 border-b border-ink-border/50 flex justify-between items-start">
+                  <div>
+                    <h2 className="text-[10px] font-sans font-bold uppercase tracking-widest text-oxide-red mb-1">
+                      {RECORDING_PROMPTS[config.docType]?.title || 'Recording'}
+                    </h2>
+                    <p className="text-sm font-serif italic text-paper-muted">
+                      {RECORDING_PROMPTS[config.docType]?.prompt || 'Just speak naturally.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowRecordingSettings(!showRecordingSettings)}
+                    className={`flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold transition-colors px-3 py-1.5 border rounded ${showRecordingSettings
+                      ? 'bg-oxide-red text-white border-oxide-red'
+                      : 'text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'
+                      }`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Context
+                  </button>
+                </div>
+
+                {/* Collapsible Settings Panel */}
+                <div className={`overflow-hidden transition-all duration-300 ease-in-out border-b border-ink-border/50 ${showRecordingSettings ? 'max-h-[280px] opacity-100' : 'max-h-0 opacity-0 border-b-0'
+                  }`}>
+                  <div className="p-6 bg-ink-base/50 space-y-4">
+                    {/* Format Row */}
+                    <div className="space-y-2">
+                      <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Format</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[{ key: 'SUMMARY', label: 'Summary' }, { key: 'EMAIL_DRAFT', label: 'Email' }, { key: 'MEETING_NOTES', label: 'Notes' }, { key: 'LINKEDIN_POST', label: 'Social' }].map((format) => (
+                          <button
+                            key={format.key}
+                            onClick={() => setConfig({ ...config, docType: format.key as DocType })}
+                            className={`h-8 px-3 text-[9px] font-bold uppercase tracking-wide border rounded transition-all ${config.docType === format.key
+                              ? 'bg-oxide-red text-white border-oxide-red'
+                              : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'
+                              }`}
+                          >
+                            {format.label}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setShowFormats(true)}
+                          className="h-8 px-3 text-[9px] font-bold uppercase tracking-wide text-paper-muted hover:text-oxide-red transition-colors"
+                        >
+                          + More
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tone Row */}
+                    <div className="space-y-2">
+                      <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Tone</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[{ key: 'CONVERSATIONAL', label: 'Casual' }, { key: 'PROFESSIONAL', label: 'Pro' }, { key: 'DIRECT', label: 'Direct' }, { key: 'CREATIVE', label: 'Creative' }].map((tone) => (
+                          <button
+                            key={tone.key}
+                            onClick={() => setConfig({ ...config, style: tone.key as WritingStyle })}
+                            className={`h-8 px-3 text-[9px] font-bold uppercase tracking-wide border rounded transition-all ${config.style === tone.key
+                              ? 'bg-ink-surface border-oxide-red text-oxide-red'
+                              : 'bg-transparent text-paper-muted border-ink-border hover:border-paper-muted hover:text-paper-text'
+                              }`}
+                          >
+                            {tone.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Detail Level Slider */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[9px] uppercase tracking-widest font-bold text-paper-muted">Detail Level</label>
+                        <span className="text-[9px] text-oxide-red font-bold uppercase">
+                          {config.length === 'VERY_CONCISE' && 'Very Concise'}
+                          {config.length === 'CONCISE' && 'Concise'}
+                          {config.length === 'BALANCED' && 'Balanced'}
+                          {config.length === 'DETAILED' && 'Detailed'}
+                          {config.length === 'VERY_DETAILED' && 'Very Detailed'}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="4"
+                        value={['VERY_CONCISE', 'CONCISE', 'BALANCED', 'DETAILED', 'VERY_DETAILED'].indexOf(config.length)}
+                        onChange={(e) => {
+                          const levels: Array<'VERY_CONCISE' | 'CONCISE' | 'BALANCED' | 'DETAILED' | 'VERY_DETAILED'> = ['VERY_CONCISE', 'CONCISE', 'BALANCED', 'DETAILED', 'VERY_DETAILED'];
+                          setConfig({ ...config, length: levels[parseInt(e.target.value)] });
+                        }}
+                        className="w-full h-1 bg-ink-border rounded-full appearance-none cursor-pointer
+                          [&::-webkit-slider-thumb]:appearance-none
+                          [&::-webkit-slider-thumb]:w-4
+                          [&::-webkit-slider-thumb]:h-4
+                          [&::-webkit-slider-thumb]:rounded-full
+                          [&::-webkit-slider-thumb]:bg-oxide-red
+                          [&::-webkit-slider-thumb]:border-2
+                          [&::-webkit-slider-thumb]:border-ink-base
+                          [&::-webkit-slider-thumb]:shadow-lg
+                          [&::-webkit-slider-thumb]:cursor-pointer
+                          [&::-moz-range-thumb]:w-4
+                          [&::-moz-range-thumb]:h-4
+                          [&::-moz-range-thumb]:rounded-full
+                          [&::-moz-range-thumb]:bg-oxide-red
+                          [&::-moz-range-thumb]:border-2
+                          [&::-moz-range-thumb]:border-ink-base
+                          [&::-moz-range-thumb]:cursor-pointer"
+                      />
+                      <div className="flex justify-between">
+                        <span className="text-[8px] text-paper-muted">Concise</span>
+                        <span className="text-[8px] text-paper-muted">Detailed</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Scrolling Text Field */}
-                <div className="flex-1 p-8 overflow-y-auto max-h-[400px] scrollbar-thin scrollbar-thumb-ink-border scrollbar-track-transparent">
+                <div className={`flex-1 p-8 overflow-y-auto scrollbar-thin scrollbar-thumb-ink-border scrollbar-track-transparent transition-all duration-300 ${showRecordingSettings ? 'max-h-[200px]' : 'max-h-[350px]'
+                  }`}>
                   <p className="font-serif text-lg leading-relaxed text-paper-text/90 whitespace-pre-wrap">
                     {finalTranscript} <span className="text-paper-muted">{transcript}</span>
                     <span className="inline-block w-1.5 h-4 ml-1 bg-oxide-red animate-pulse align-middle" />
                   </p>
                 </div>
 
-                {/* Bottom Control Bar */}
-                <div className="h-20 border-t border-ink-border bg-ink-base/80 backdrop-blur flex items-center justify-between px-8">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-ink-surface border border-ink-border flex items-center justify-center">
-                      <StopIcon className="w-4 h-4 text-oxide-red animate-pulse" /> {/* Replaced mic with stop icon/eq concept */}
+                {/* Bottom Control Bar - Calm, No Anxiety */}
+                <div className="border-t border-ink-border bg-ink-base/80 backdrop-blur px-8 py-4">
+                  {/* Progress Bar Section - Fills left-to-right, represents included content */}
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-3">
+                        <MechanicalMeter audioLevels={audioLevels} />
+                        <span className="text-sm font-serif italic text-paper-text">Listening...</span>
+                      </div>
+                      {/* Subtle helper text when past free limit */}
+                      {!isPro && pastFreeLimit && (
+                        <span className="text-[10px] text-paper-muted italic animate-in fade-in duration-500">
+                          Free summary limit reached — keep talking.
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs uppercase tracking-widest text-paper-muted font-bold">Recording...</div>
+                    {/* Progress Bar - fills over FREE_LIMIT, stays full after */}
+                    <div className="relative h-2 bg-ink-border/50 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-oxide-red to-orange-500 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${Math.min((recordingSeconds / FREE_LIMIT) * 100, 100)}%` }}
+                      />
+                      {/* Tick mark at free limit */}
+                      {!isPro && (
+                        <div className="absolute right-0 top-0 h-full w-0.5 bg-paper-muted/30" />
+                      )}
+                    </div>
+                    <p className="text-[10px] text-paper-muted/60 mt-1.5 font-sans">
+                      Say what you need — we'll structure it for you.
+                    </p>
                   </div>
 
-                  {/* Main Stop Action */}
-                  <button
-                    onClick={stopRecording}
-                    className="h-10 px-6 bg-oxide-red hover:bg-orange-700 text-white rounded-sm flex items-center gap-2 transition-all shadow-lg shadow-oxide-red/20"
-                  >
-                    <span className="text-[10px] uppercase tracking-widest font-bold">Finish</span>
-                    <div className="w-4 h-4 rounded-sm bg-white/20 flex items-center justify-center">
-                      <div className="w-2 h-2 bg-white rounded-[1px]" />
-                    </div>
-                  </button>
+                  {/* Finish Button Row */}
+                  <div className="flex items-center justify-end">
+                    <button
+                      onClick={stopRecording}
+                      className="h-10 px-6 bg-oxide-red hover:bg-orange-700 text-white flex items-center gap-2 transition-all shadow-lg shadow-oxide-red/20 rounded"
+                    >
+                      <span className="text-[10px] uppercase tracking-widest font-bold">Finish</span>
+                      <div className="w-4 h-4 bg-white/20 flex items-center justify-center rounded-sm">
+                        <div className="w-2 h-2 bg-white rounded-[1px]" />
+                      </div>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* 4. RESULT STATE */}
             {appState === 'RESULT' && (
-              <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Result Text */}
-                <div ref={resultRef} className="flex-1 p-8 overflow-y-auto max-h-[500px] scrollbar-thin scrollbar-thumb-ink-border scrollbar-track-transparent">
+              <div className="flex flex-col h-[calc(100vh-160px)] animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {/* Top Bar with Back Button */}
+                <div className="shrink-0 border-b border-ink-border px-6 py-3 flex items-center">
+                  <button onClick={() => { setAppState('CONFIG'); setResult(''); setFinalTranscript(''); }} className="text-[10px] uppercase font-bold text-paper-muted hover:text-paper-text transition-colors flex items-center gap-2">
+                    ← New Note
+                  </button>
+                </div>
+
+                {/* Result Text - SCROLLABLE */}
+                <div ref={resultRef} className="flex-1 p-6 md:p-8 overflow-y-auto scrollbar-thin scrollbar-thumb-ink-border scrollbar-track-transparent">
                   {error ? (
-                    <div className="p-4 bg-red-950/20 border border-red-900/50 rounded-sm">
+                    <div className="p-4 bg-red-950/20 border border-red-900/50 ">
                       <p className="text-sm text-red-200">{error}</p>
                       <button onClick={() => setAppState('CONFIG')} className="mt-4 text-xs text-red-500 underline">Reset</button>
                     </div>
                   ) : (
-                    <div className="prose prose-invert prose-p:text-paper-text prose-headings:font-normal prose-sm max-w-none font-serif leading-relaxed">
-                      <p className="whitespace-pre-wrap">{result}</p>
-                    </div>
+                    <>
+                      <article className="prose prose-invert prose-p:text-paper-text/90 prose-headings:font-normal prose-headings:text-paper-text prose-strong:text-oxide-red prose-li:text-paper-text/80 prose-xs md:prose-sm max-w-none font-serif leading-relaxed">
+                        <ReactMarkdown>{result}</ReactMarkdown>
+                      </article>
+
+                      {/* Upgrade Nudge - Only show if user went past free limit */}
+                      {!isPro && pastFreeLimit && (
+                        <div className="mt-8 p-6 bg-ink-base/50 border border-ink-border rounded-lg animate-in fade-in slide-in-from-bottom-2 duration-500">
+                          <h4 className="text-base font-serif text-paper-text mb-2">Want the full breakdown?</h4>
+                          <p className="text-sm text-paper-muted mb-4">
+                            Upgrade to include everything you said, with deeper structure, examples, and tone refinement.
+                          </p>
+                          <button
+                            onClick={() => { setUpsellMode('UPGRADE'); setShowUpsell(true); }}
+                            className="px-5 py-2.5 bg-oxide-red hover:bg-orange-700 text-white text-[10px] uppercase tracking-widest font-bold rounded transition-colors shadow-lg shadow-oxide-red/20"
+                          >
+                            Unlock full summary
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
-                {/* Result Actions Footer */}
-                <div className="border-t border-ink-border p-4 bg-ink-base/50 flex flex-col md:flex-row gap-4 justify-between items-center">
-
-                  <button onClick={() => { setAppState('CONFIG'); setResult(''); setFinalTranscript(''); }} className="text-[10px] uppercase font-bold text-paper-muted hover:text-paper-text transition-colors px-4">
-                    ← New Note
-                  </button>
-
-                  <div className="flex items-center gap-4">
-                    <div className="flex gap-2 border-r border-ink-border pr-4 mr-2">
-                      <button onClick={() => setShowUpsell(true)} className="w-8 h-8 flex items-center justify-center rounded-sm hover:bg-ink-surface text-paper-muted hover:text-white transition-colors">
-                        <QueueListIcon className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => setShowUpsell(true)} className="w-8 h-8 flex items-center justify-center rounded-sm hover:bg-ink-surface text-paper-muted hover:text-white transition-colors">
-                        <ShareIcon className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => setShowUpsell(true)} className="w-8 h-8 flex items-center justify-center rounded-sm hover:bg-ink-surface text-paper-muted hover:text-white transition-colors">
-                        <GlobeAltIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <CopyButton text={result} />
-                  </div>
+                {/* Actions Footer - Share integrations + Copy */}
+                <div className="shrink-0 border-t border-ink-border p-4 bg-ink-base/90 backdrop-blur-md flex justify-between items-center gap-4">
+                  <IntegrationGrid
+                    contentType={config.docType}
+                    maxVisible={5}
+                    onUpgrade={() => { setUpsellMode('UPGRADE'); setShowUpsell(true); }}
+                    text={result}
+                  />
+                  <CopyButton text={result} />
                 </div>
               </div>
             )}
@@ -561,12 +1055,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Helper Text below box */}
-        {appState === 'CONFIG' && !isPro && (
-          <div className="flex items-center gap-2 opacity-50 text-[10px] uppercase tracking-widest text-paper-muted">
-            <span>•</span> Limit 2:00 per note <span>•</span>
-          </div>
-        )}
+        {/* Feature Cards - Only show in CONFIG state */}
+        {appState === 'CONFIG' && <FeatureCards />}
 
       </main>
 
@@ -578,7 +1068,7 @@ export default function Home() {
             <a href="#" className="hover:text-paper-text transition-colors">Terms</a>
             <a href="#" className="hover:text-paper-text transition-colors">About</a>
           </div>
-          <p className="opacity-50">© 2024 Vocalize Systems Inc.</p>
+          <p className="opacity-50">© 2026 ONE SIX TWO Ltd.</p>
         </div>
       </footer>
 
@@ -588,6 +1078,45 @@ export default function Home() {
         onUpgrade={handleUpgrade}
         mode={upsellMode}
       />
+      <PricingModal
+        isOpen={showPricing}
+        onClose={() => setShowPricing(false)}
+        onLoginRequired={() => {
+          setShowPricing(false);
+          router.push('/login?redirect=/?upgrade=true');
+        }}
+      />
+      <FormatModal
+        isOpen={showFormats}
+        onClose={() => setShowFormats(false)}
+        onSelect={(format) => setConfig({ ...config, docType: format })}
+        currentFormat={config.docType}
+      />
+      <HistorySidebar
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        history={history}
+        isPro={isPro}
+        onSelectItem={handleSelectHistoryItem}
+        onDeleteItem={handleDeleteHistoryItem}
+        onUpgrade={() => { setShowHistory(false); setUpsellMode('UPGRADE'); setShowUpsell(true); }}
+      />
     </div>
+  );
+}
+
+function HomeLoading() {
+  return (
+    <div className="min-h-screen bg-ink-base flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-2 border-oxide-red border-t-transparent rounded-full" />
+    </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<HomeLoading />}>
+      <HomeContent />
+    </Suspense>
   );
 }

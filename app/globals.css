@@ -1,36 +1,56 @@
 @import "tailwindcss";
 
+/* 
+  Vocalize Design System 
+  Concept: "Modern recording instrument"
+  Colors: Deep ink/charcoal, warm off-white, mechanical accents (burnt orange, brass)
+*/
+
 @theme {
-  --color-ink-base: #0f172a;
-  /* Deep Slate/Navy (from image) */
-  --color-ink-surface: #1e293b;
-  /* Lighter Slate Surface */
-  --color-ink-border: #334155;
-  /* Slate Border */
-  --color-paper-text: #f1f5f9;
-  /* White/Slate-100 */
-  --color-paper-muted: #94a3b8;
-  /* Muted Slate */
-  --color-oxide-red: #ea580c;
-  /* Burnt Orange/Copper Accent */
+  /* Deep Ink Base - slightly warmer than before */
+  --color-ink-base: #131720;
+  /* Card/Surface - lifted from base */
+  --color-ink-surface: #191E29;
+  /* Borders - subtle but visible */
+  --color-ink-border: #2A2F3A;
+  /* Foreground - warm off-white */
+  --color-paper-text: #F2EFE9;
+  /* Muted text */
+  --color-paper-muted: #8C919D;
+  /* Primary accent - burnt orange */
+  --color-oxide-red: #E67A2E;
+  /* Secondary accent - muted brass */
+  --color-brass: #B3A059;
 
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui;
   --font-serif: var(--font-plex-serif), ui-serif, Georgia;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
 
 @layer base {
   body {
     @apply bg-ink-base text-paper-text;
     font-feature-settings: "ss01", "ss02";
-    /* Technical alternate glyphs */
-    background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%);
-    /* Subtle top light */
+    /* Radial gradient lighting from top */
+    background-image:
+      radial-gradient(at 50% 0%, hsla(222, 25%, 15%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(222, 25%, 12%, 1) 0px, transparent 50%);
     background-attachment: fixed;
   }
 
-  /* Editorial Selection Style */
+  /* Grain texture overlay - add to main container via ::before if needed */
+  .grain-texture::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  }
+
+  /* Selection style with primary accent */
   ::selection {
-    @apply bg-oxide-red/30 text-white;
+    @apply bg-oxide-red/20 text-oxide-red;
   }
 
   /* Custom Scrollbar */
@@ -43,7 +63,17 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-ink-border hover:bg-paper-muted transition-colors duration-200 rounded-full;
+    @apply bg-ink-border hover:bg-paper-muted transition-colors duration-200;
+  }
+
+  /* Headings use serif */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-serif tracking-tight;
   }
 }
 
@@ -53,15 +83,16 @@
   .transition-mechanical {
     transition-property: all;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-    transition-duration: 150ms;
+    transition-duration: 100ms;
   }
 
-  /* The "Reference Image" Button Style */
+  /* Hardware-style button */
   .btn-instrument {
-    @apply border border-ink-border bg-transparent text-paper-muted uppercase tracking-widest text-[10px] font-bold font-sans hover:border-paper-muted hover:text-paper-text transition-all duration-200 active:translate-y-px;
+    @apply border border-ink-border bg-ink-surface/50 text-paper-muted uppercase tracking-widest text-[10px] font-bold font-sans;
+    @apply hover:border-paper-muted hover:text-paper-text transition-all duration-100 active:scale-[0.98];
   }
 
   .btn-instrument-active {
-    @apply border-oxide-red text-oxide-red bg-oxide-red/5 shadow-[0_0_15px_#ea580c1a];
+    @apply border-oxide-red/50 text-oxide-red bg-ink-surface shadow-[0_0_10px_-5px_#E67A2E];
   }
 }
