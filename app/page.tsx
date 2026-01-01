@@ -248,32 +248,29 @@ export default function Home() {
   useEffect(() => {
     const checkUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-      setUser(user);
+      if (user) {
+        setUser(user);
+        // Fetch Profile
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('is_pro')
+          .eq('id', user.id)
+          .single();
 
-      // Fetch Profile
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('is_pro')
-        .eq('id', user.id)
-        .single();
-
-      if (data) {
-        setIsPro(data.is_pro);
-      } else if (error && error.code === 'PGRST116') {
-        // Create Profile if missing
-        await supabase.from('profiles').insert({
-          id: user.id,
-          email: user.email,
-          is_pro: false
-        });
+        if (data) {
+          setIsPro(data.is_pro);
+        } else if (error && error.code === 'PGRST116') {
+          // Create Profile if missing
+          await supabase.from('profiles').insert({
+            id: user.id,
+            email: user.email,
+            is_pro: false
+          });
+        }
       }
     };
     checkUser();
-  }, [router, supabase]);
+  }, [supabase]);
 
   // Constants
   const FREE_LIMIT = 120; // 2 minutes
@@ -451,6 +448,11 @@ export default function Home() {
   };
 
   const handleUpgrade = () => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    // TODO: Integrate Lemon Squeezy here
     setIsPro(true);
     setShowUpsell(false);
     // Success feedback
@@ -466,19 +468,27 @@ export default function Home() {
 
       {/* Top Bar */}
       <div className="absolute top-6 right-6 z-50 flex items-center gap-4">
-        {user && (
+        {user ? (
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-500 font-medium hidden md:block">{user.email}</span>
             <button
               onClick={async () => {
                 await supabase.auth.signOut();
-                router.push('/login');
+                setUser(null);
+                setIsPro(false);
               }}
               className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
             >
               Sign Out
             </button>
           </div>
+        ) : (
+          <button
+            onClick={() => router.push('/login')}
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-full transition-colors shadow-lg shadow-cyan-900/20"
+          >
+            Sign In
+          </button>
         )}
       </div>
 
