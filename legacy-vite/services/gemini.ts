@@ -1,8 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { ProcessingConfig, DocType } from '../types';
 
-// We use Gemini Flash for speed and cost-efficiency as requested
-const MODEL_NAME = 'gemini-3-flash-preview';
+// We use Gemini Flash 8b for maximum cost-efficiency
+const MODEL_NAME = 'gemini-1.5-flash-8b';
 
 export const processTranscript = async (
   transcript: string, 
@@ -10,9 +10,9 @@ export const processTranscript = async (
 ): Promise<string> => {
   if (!transcript.trim()) return '';
 
-  const apiKey = process.env.API_KEY;
+  const apiKey = import.meta.env.VITE_API_KEY;
   if (!apiKey) {
-    throw new Error("API Key not found in environment variables");
+    throw new Error("API Key (VITE_API_KEY) not found in environment variables");
   }
 
   const ai = new GoogleGenAI({ apiKey });
